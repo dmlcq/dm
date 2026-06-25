@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
-import { Camera, ImageUp, Leaf, Triangle, Octagon, RefreshCw } from 'lucide-react-taro'
+import { Camera, ImageUp, Leaf, Triangle, Octagon, RefreshCw, History } from 'lucide-react-taro'
 
 // 配料分析结果类型
 interface Ingredient {
@@ -183,6 +183,17 @@ const IndexPage = () => {
         <Text className="block text-sm text-gray-500 mt-1">
           智能识别配料，守护健康饮食
         </Text>
+        {/* 历史记录入口 */}
+        <View className="mt-3">
+          <Button 
+            variant="ghost" 
+            size="sm"
+            onClick={() => Taro.navigateTo({ url: '/pages/history/index' })}
+          >
+            <History size={16} color="#22c55e" className="mr-1" />
+            <Text className="text-green-600 text-sm">查看历史</Text>
+          </Button>
+        </View>
       </View>
 
       {/* 操作入口 */}

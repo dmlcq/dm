@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common'
 import { S3Storage } from 'coze-coding-dev-sdk'
 import { LLMClient, Config } from 'coze-coding-dev-sdk'
+import { getSupabaseClient } from '@/storage/database/supabase-client'
 
 // 配料分析结果类型
 export interface Ingredient {
@@ -17,10 +18,34 @@ export interface AnalysisResult {
   summary: string
 }
 
+// 数据库记录类型
+export interface ScanHistoryRecord {
+  id: string
+  image_key: string
+  image_url: string
+  product_name?: string
+  health_score: number
+  recommendation: string
+  ingredients: Ingredient[]
+  created_at: string
+}
+
+// 内存缓存项
+interface CacheItem {
+  result: AnalysisResult
+  imageUrl: string
+  timestamp: number
+}
+
 @Injectable()
 export class IngredientsService {
   private storage: S3Storage
   private llmClient: LLMClient
+  private supabase = getSupabaseClient()
+  
+  // 内存缓存（TTL: 30分钟）
+  private memoryCache = new Map<string, CacheItem>()
+  private CACHE_TTL = 30 * 60 * 1000 // 30分钟
 
   constructor() {
     // 初始化对象存储
@@ -35,6 +60,20 @@ export class IngredientsService {
     // 初始化LLM客户端
     const config = new Config()
     this.llmClient = new LLMClient(config)
+    
+    // 定期清理过期缓存
+    setInterval(() => this.cleanExpiredCache(), 5 * 60 * 1000)
+  }
+
+  // 清理过期缓存
+  private cleanExpiredCache() {
+    const now = Date.now()
+    for (const [key, item] of this.memoryCache.entries()) {
+      if (now - item.timestamp > this.CACHE_TTL) {
+        this.memoryCache.delete(key)
+        console.log('清理过期缓存:', key)
+      }
+    }
   }
 
   // 上传图片到对象存储
@@ -56,8 +95,81 @@ export class IngredientsService {
     return { imageKey: fileKey, imageUrl }
   }
 
+  // 分析配料表（带缓存）
+  async analyzeIngredients(imageKey: string): Promise<AnalysisResult & { cached?: boolean }> {
+    // 1. 先检查内存缓存
+    const memoryCached = this.memoryCache.get(imageKey)
+    if (memoryCached && Date.now() - memoryCached.timestamp < this.CACHE_TTL) {
+      console.log('命中内存缓存:', imageKey)
+      return { ...memoryCached.result, cached: true }
+    }
+
+    // 2. 检查数据库缓存
+    const { data: dbCached, error: dbError } = await this.supabase
+      .from('scan_history')
+      .select('*')
+      .eq('image_key', imageKey)
+      .maybeSingle()
+
+    if (dbError) {
+      console.error('数据库查询失败:', dbError.message)
+    }
+
+    if (dbCached) {
+      console.log('命中数据库缓存:', imageKey)
+      const result: AnalysisResult = {
+        score: dbCached.health_score,
+        recommendation: dbCached.recommendation as AnalysisResult['recommendation'],
+        ingredients: dbCached.ingredients as Ingredient[],
+        summary: `历史分析记录 (${new Date(dbCached.created_at).toLocaleDateString()})`
+      }
+      // 写入内存缓存
+      this.memoryCache.set(imageKey, {
+        result,
+        imageUrl: dbCached.image_url,
+        timestamp: Date.now()
+      })
+      return { ...result, cached: true }
+    }
+
+    // 3. 未命中缓存，调用LLM分析
+    console.log('开始LLM分析:', imageKey)
+    const result = await this.analyzeWithLLM(imageKey)
+
+    // 4. 保存到数据库
+    const imageUrl = await this.storage.generatePresignedUrl({
+      key: imageKey,
+      expireTime: 86400
+    })
+
+    const { error: insertError } = await this.supabase
+      .from('scan_history')
+      .insert({
+        image_key: imageKey,
+        image_url: imageUrl,
+        health_score: result.score,
+        recommendation: result.recommendation,
+        ingredients: result.ingredients
+      })
+
+    if (insertError) {
+      console.error('保存分析记录失败:', insertError.message)
+    } else {
+      console.log('分析记录已保存到数据库')
+    }
+
+    // 5. 写入内存缓存
+    this.memoryCache.set(imageKey, {
+      result,
+      imageUrl,
+      timestamp: Date.now()
+    })
+
+    return { ...result, cached: false }
+  }
+
   // 使用多模态LLM分析配料表图片
-  async analyzeIngredients(imageKey: string): Promise<AnalysisResult> {
+  private async analyzeWithLLM(imageKey: string): Promise<AnalysisResult> {
     // 获取图片URL
     const imageUrl = await this.storage.generatePresignedUrl({
       key: imageKey,
@@ -162,5 +274,48 @@ export class IngredientsService {
         summary: '分析结果解析失败，请重新上传清晰的配料表图片'
       }
     }
+  }
+
+  // 获取历史记录列表
+  async getHistory(limit: number = 20): Promise<ScanHistoryRecord[]> {
+    const { data, error } = await this.supabase
+      .from('scan_history')
+      .select('id, image_key, image_url, product_name, health_score, recommendation, ingredients, created_at')
+      .order('created_at', { ascending: false })
+      .limit(limit)
+
+    if (error) {
+      throw new Error(`获取历史记录失败: ${error.message}`)
+    }
+
+    return (data || []) as ScanHistoryRecord[]
+  }
+
+  // 获取单条历史记录详情
+  async getHistoryDetail(id: string): Promise<ScanHistoryRecord | null> {
+    const { data, error } = await this.supabase
+      .from('scan_history')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle()
+
+    if (error) {
+      throw new Error(`获取历史详情失败: ${error.message}`)
+    }
+
+    return data as ScanHistoryRecord | null
+  }
+
+  // 删除历史记录
+  async deleteHistory(id: string): Promise<void> {
+    const { error } = await this.supabase
+      .from('scan_history')
+      .delete()
+      .eq('id', id)
+
+    if (error) {
+      throw new Error(`删除记录失败: ${error.message}`)
+    }
+    console.log('历史记录已删除:', id)
   }
 }
