@@ -1,6 +1,6 @@
 import { Controller, Post, Get, Delete, UploadedFile, UseInterceptors, Body, Param, Query, HttpCode } from '@nestjs/common'
 import { FileInterceptor } from '@nestjs/platform-express'
-import { IngredientsService, AnalysisResult, ScanHistoryRecord } from './ingredients.service'
+import { IngredientsService, AnalysisResult, ScanHistoryRecord, IdentityType } from './ingredients.service'
 
 @Controller('ingredients')
 export class IngredientsController {
@@ -25,27 +25,30 @@ export class IngredientsController {
     return { code: 200, msg: 'success', data: result }
   }
 
-  // 分析配料表（带缓存）
+  // 分析配料表（带缓存，支持身份选择）
   @Post('analyze')
   @HttpCode(200)
-  async analyzeIngredients(@Body() body: { imageKey: string }): Promise<{ code: number; msg: string; data: (AnalysisResult & { cached?: boolean }) | null }> {
+  async analyzeIngredients(@Body() body: { imageKey: string; identity?: IdentityType }): Promise<{ code: number; msg: string; data: (AnalysisResult & { cached?: boolean }) | null }> {
     console.log('分析请求:', body)
 
     if (!body.imageKey) {
       return { code: 400, msg: '缺少图片Key', data: null }
     }
 
-    const result = await this.ingredientsService.analyzeIngredients(body.imageKey)
-    console.log('分析结果:', { score: result.score, cached: result.cached })
+    // 身份默认为成人
+    const identity: IdentityType = body.identity || 'adult'
+    
+    const result = await this.ingredientsService.analyzeIngredients(body.imageKey, identity)
+    console.log('分析结果:', { score: result.score, identity, cached: result.cached })
     return { code: 200, msg: 'success', data: result }
   }
 
-  // 获取历史记录列表
+  // 获取历史记录列表（支持按身份筛选）
   @Get('history')
-  async getHistory(@Query('limit') limit?: string): Promise<{ code: number; msg: string; data: ScanHistoryRecord[] }> {
+  async getHistory(@Query('limit') limit?: string, @Query('identity') identity?: IdentityType): Promise<{ code: number; msg: string; data: ScanHistoryRecord[] }> {
     const limitNum = limit ? parseInt(limit, 10) : 20
-    const history = await this.ingredientsService.getHistory(limitNum)
-    console.log('获取历史记录:', { count: history.length })
+    const history = await this.ingredientsService.getHistory(limitNum, identity)
+    console.log('获取历史记录:', { count: history.length, identity })
     return { code: 200, msg: 'success', data: history }
   }
 

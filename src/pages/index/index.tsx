@@ -8,7 +8,10 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
-import { Camera, ImageUp, Leaf, Triangle, Octagon, RefreshCw, History } from 'lucide-react-taro'
+import { Camera, ImageUp, Leaf, Triangle, Octagon, RefreshCw, History, User, Heart, Baby } from 'lucide-react-taro'
+
+// 人群身份类型
+type IdentityType = 'adult' | 'pregnant' | 'child'
 
 // 配料分析结果类型
 interface Ingredient {
@@ -23,6 +26,7 @@ interface AnalysisResult {
   recommendation: 'recommend' | 'caution' | 'avoid'
   ingredients: Ingredient[]
   summary: string
+  identity?: IdentityType  // 分析使用的身份
 }
 
 const IndexPage = () => {
@@ -30,6 +34,14 @@ const IndexPage = () => {
   const [localImagePath, setLocalImagePath] = useState<string>('')
   const [loading, setLoading] = useState<boolean>(false)
   const [result, setResult] = useState<AnalysisResult | null>(null)
+  const [identity, setIdentity] = useState<IdentityType>('adult')  // 默认成人
+
+  // 身份选项配置
+  const identityOptions: { value: IdentityType; label: string; icon: typeof User; desc: string }[] = [
+    { value: 'adult', label: '成人', icon: User, desc: '适量添加剂可接受' },
+    { value: 'pregnant', label: '孕妇', icon: Heart, desc: '严格谨慎，避免风险' },
+    { value: 'child', label: '儿童', icon: Baby, desc: '成长保护，限制添加剂' }
+  ]
 
   // 选择图片（拍照或相册）
   const handleChooseImage = async (sourceType: 'camera' | 'album') => {
@@ -83,13 +95,13 @@ const IndexPage = () => {
         setImageUrl(uploadedUrl)
       }
       
-      // 2. 调用分析接口
-      Taro.showToast({ title: '正在分析配料...', icon: 'loading', duration: 30000 })
+      // 2. 调用分析接口（传递身份参数）
+      Taro.showToast({ title: `正在分析配料（${identity === 'adult' ? '成人' : identity === 'pregnant' ? '孕妇' : '儿童'}标准）...`, icon: 'loading', duration: 30000 })
       
       const analyzeRes = await Network.request({
         url: '/api/ingredients/analyze',
         method: 'POST',
-        data: { imageKey }
+        data: { imageKey, identity }  // 传递身份
       })
       
       console.log('分析响应:', analyzeRes.data)
@@ -177,7 +189,7 @@ const IndexPage = () => {
   return (
     <View className="min-h-screen bg-green-50 p-4">
       {/* 顶部标题 */}
-      <View className="text-center mb-6">
+      <View className="text-center mb-4">
         <Leaf size={32} color="#22c55e" className="mb-2" />
         <Text className="block text-xl font-bold text-gray-800">配料表AI分析</Text>
         <Text className="block text-sm text-gray-500 mt-1">
@@ -195,6 +207,44 @@ const IndexPage = () => {
           </Button>
         </View>
       </View>
+
+      {/* 身份选择区域 */}
+      <Card className="mb-4">
+        <CardContent className="p-4">
+          <Text className="block text-sm font-medium text-gray-700 mb-3">选择人群身份</Text>
+          <View className="flex flex-row gap-2">
+            {identityOptions.map((option) => {
+              const isSelected = identity === option.value
+              const IconComponent = option.icon
+              return (
+                <View 
+                  key={option.value}
+                  className={`flex-1 rounded-lg p-3 border-2 transition-all ${
+                    isSelected 
+                      ? 'border-green-500 bg-green-100' 
+                      : 'border-gray-200 bg-white'
+                  }`}
+                  onClick={() => setIdentity(option.value)}
+                >
+                  <View className="flex flex-col items-center">
+                    <IconComponent 
+                      size={24} 
+                      color={isSelected ? '#22c55e' : '#9ca3af'} 
+                      className="mb-1"
+                    />
+                    <Text className={`block font-medium ${isSelected ? 'text-green-600' : 'text-gray-500'}`}>
+                      {option.label}
+                    </Text>
+                    <Text className="block text-xs text-gray-400 mt-1 text-center">
+                      {option.desc}
+                    </Text>
+                  </View>
+                </View>
+              )
+            })}
+          </View>
+        </CardContent>
+      </Card>
 
       {/* 操作入口 */}
       {!result && !loading && (
