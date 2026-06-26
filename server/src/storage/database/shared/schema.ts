@@ -15,6 +15,8 @@ export const scanHistory = pgTable(
     image_key: varchar("image_key", { length: 255 }).notNull(),  // 对象存储 key
     image_url: text("image_url").notNull(),  // 图片公网 URL
     product_name: varchar("product_name", { length: 255 }),  // 产品名称（可选）
+    // 配料内容 hash（用于缓存相同配料内容的分析结果）
+    content_hash: varchar("content_hash", { length: 64 }),
     health_score: integer("health_score").notNull(),  // 健康评分 0-100
     recommendation: varchar("recommendation", { length: 50 }).notNull(),  // recommend/caution/avoid
     ingredients: jsonb("ingredients").notNull(),  // 配料列表 JSON
@@ -25,5 +27,7 @@ export const scanHistory = pgTable(
     index("scan_history_image_key_idx").on(table.image_key),
     // created_at 用于历史记录排序
     index("scan_history_created_at_idx").on(table.created_at),
+    // 配料内容 hash 索引（用于快速查询相同配料内容）
+    index("scan_history_content_hash_idx").on(table.content_hash),
   ]
 );

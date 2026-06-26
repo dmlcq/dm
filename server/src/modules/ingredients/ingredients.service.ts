@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common'
 import { S3Storage } from 'coze-coding-dev-sdk'
 import { LLMClient, Config } from 'coze-coding-dev-sdk'
 import { getSupabaseClient } from '@/storage/database/supabase-client'
+import * as crypto from 'crypto'
 
 // 配料分析结果类型
 export interface Ingredient {
@@ -24,6 +25,7 @@ export interface ScanHistoryRecord {
   image_key: string
   image_url: string
   product_name?: string
+  content_hash?: string
   health_score: number
   recommendation: string
   ingredients: Ingredient[]
@@ -34,6 +36,7 @@ export interface ScanHistoryRecord {
 interface CacheItem {
   result: AnalysisResult
   imageUrl: string
+  contentHash: string  // 配料内容 hash
   timestamp: number
 }
 
@@ -76,6 +79,36 @@ export class IngredientsService {
     }
   }
 
+  /**
+   * 生成配料内容的标准化 hash
+   * 步骤：
+   * 1. 提取所有配料名称
+   * 2. 去除空格、转小写
+   * 3. 按字母排序（避免顺序不同导致 hash 不同）
+   * 4. 生成 SHA256 hash
+   */
+  private generateContentHash(ingredients: Ingredient[]): string {
+    // 提取配料名称，标准化处理
+    const normalizedNames = ingredients
+      .map(ing => ing.name.trim().toLowerCase())
+      .filter(name => name.length > 0)
+      .sort()  // 排序，避免顺序不同
+    
+    // 拼接成字符串
+    const contentString = normalizedNames.join('|')
+    
+    // 生成 SHA256 hash
+    const hash = crypto.createHash('sha256').update(contentString).digest('hex')
+    
+    console.log('配料内容标准化:', { 
+      originalCount: ingredients.length,
+      normalizedNames: normalizedNames.slice(0, 5), // 只打印前5个
+      hash 
+    })
+    
+    return hash
+  }
+
   // 上传图片到对象存储
   async uploadImage(file: Express.Multer.File) {
     const fileKey = await this.storage.uploadFile({
@@ -95,48 +128,61 @@ export class IngredientsService {
     return { imageKey: fileKey, imageUrl }
   }
 
-  // 分析配料表（带缓存）
+  // 分析配料表（带缓存 - 以配料内容为 Key）
   async analyzeIngredients(imageKey: string): Promise<AnalysisResult & { cached?: boolean }> {
-    // 1. 先检查内存缓存
+    // 1. 先检查内存缓存（按 imageKey，用于同一用户快速重试）
     const memoryCached = this.memoryCache.get(imageKey)
     if (memoryCached && Date.now() - memoryCached.timestamp < this.CACHE_TTL) {
-      console.log('命中内存缓存:', imageKey)
+      console.log('命中内存缓存(imageKey):', imageKey)
       return { ...memoryCached.result, cached: true }
     }
 
-    // 2. 检查数据库缓存
-    const { data: dbCached, error: dbError } = await this.supabase
-      .from('scan_history')
-      .select('*')
-      .eq('image_key', imageKey)
-      .maybeSingle()
-
-    if (dbError) {
-      console.error('数据库查询失败:', dbError.message)
-    }
-
-    if (dbCached) {
-      console.log('命中数据库缓存:', imageKey)
-      const result: AnalysisResult = {
-        score: dbCached.health_score,
-        recommendation: dbCached.recommendation as AnalysisResult['recommendation'],
-        ingredients: dbCached.ingredients as Ingredient[],
-        summary: `历史分析记录 (${new Date(dbCached.created_at).toLocaleDateString()})`
-      }
-      // 写入内存缓存
-      this.memoryCache.set(imageKey, {
-        result,
-        imageUrl: dbCached.image_url,
-        timestamp: Date.now()
-      })
-      return { ...result, cached: true }
-    }
-
-    // 3. 未命中缓存，调用LLM分析
+    // 2. 调用 LLM 分析（获取配料内容）
     console.log('开始LLM分析:', imageKey)
     const result = await this.analyzeWithLLM(imageKey)
 
-    // 4. 保存到数据库
+    // 3. 生成配料内容 hash
+    const contentHash = this.generateContentHash(result.ingredients)
+
+    // 4. 用 contentHash 查询数据库缓存（相同配料内容可复用）
+    const { data: existingRecord, error: queryError } = await this.supabase
+      .from('scan_history')
+      .select('*')
+      .eq('content_hash', contentHash)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (queryError) {
+      console.error('查询历史记录失败:', queryError.message)
+    }
+
+    if (existingRecord) {
+      console.log('命中数据库缓存(contentHash):', contentHash, '已有相同配料内容的分析记录')
+      // 返回已有记录的结果（但更新图片信息）
+      const cachedResult: AnalysisResult = {
+        score: existingRecord.health_score,
+        recommendation: existingRecord.recommendation as AnalysisResult['recommendation'],
+        ingredients: existingRecord.ingredients as Ingredient[],
+        summary: `该配料表已有历史分析记录 (${new Date(existingRecord.created_at).toLocaleDateString()})`
+      }
+      
+      // 写入内存缓存（当前图片）
+      const imageUrl = await this.storage.generatePresignedUrl({
+        key: imageKey,
+        expireTime: 86400
+      })
+      this.memoryCache.set(imageKey, {
+        result: cachedResult,
+        imageUrl,
+        contentHash,
+        timestamp: Date.now()
+      })
+      
+      return { ...cachedResult, cached: true }
+    }
+
+    // 5. 新配料内容，保存到数据库
     const imageUrl = await this.storage.generatePresignedUrl({
       key: imageKey,
       expireTime: 86400
@@ -147,6 +193,7 @@ export class IngredientsService {
       .insert({
         image_key: imageKey,
         image_url: imageUrl,
+        content_hash: contentHash,  // 保存配料内容 hash
         health_score: result.score,
         recommendation: result.recommendation,
         ingredients: result.ingredients
@@ -155,13 +202,14 @@ export class IngredientsService {
     if (insertError) {
       console.error('保存分析记录失败:', insertError.message)
     } else {
-      console.log('分析记录已保存到数据库')
+      console.log('分析记录已保存到数据库, contentHash:', contentHash)
     }
 
-    // 5. 写入内存缓存
+    // 6. 写入内存缓存
     this.memoryCache.set(imageKey, {
       result,
       imageUrl,
+      contentHash,
       timestamp: Date.now()
     })
 
@@ -280,7 +328,7 @@ export class IngredientsService {
   async getHistory(limit: number = 20): Promise<ScanHistoryRecord[]> {
     const { data, error } = await this.supabase
       .from('scan_history')
-      .select('id, image_key, image_url, product_name, health_score, recommendation, ingredients, created_at')
+      .select('id, image_key, image_url, product_name, content_hash, health_score, recommendation, ingredients, created_at')
       .order('created_at', { ascending: false })
       .limit(limit)
 
