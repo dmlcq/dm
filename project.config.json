@@ -1,7 +1,8 @@
 {
   "miniprogramRoot": "./dist",
+  "cloudfunctionRoot": "./cloudfunctions/",
   "projectname": "coze-mini-program",
-  "description": "test",
+  "description": "食品配料表AI分析小程序",
   "appid": "touristappid",
   "setting": {
     "urlCheck": true,
@@ -12,5 +13,11 @@
     "minified": false
   },
   "compileType": "miniprogram",
-  "packOptions": { "ignore": [{ "type": "folder", "value": "./assets" }] }
+  "packOptions": { 
+    "ignore": [
+      { "type": "folder", "value": "./assets" },
+      { "type": "folder", "value": "./server" }
+    ] 
+  },
+  "cloudbaseRoot": "./cloudbaserc.json"
 }

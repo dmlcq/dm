@@ -1,47 +1,43 @@
 import { View, Text, Image } from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import { useState, useEffect } from 'react'
-import { Network } from '@/network'
+import CloudService from '@/cloud-service'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Leaf, Triangle, Octagon, Trash2, ArrowLeft, Clock } from 'lucide-react-taro'
+import { Leaf, Triangle, Octagon, Trash2, ArrowLeft, Clock, User, Heart, Baby } from 'lucide-react-taro'
 
-// 历史记录类型
+// 历史记录类型（适配云数据库格式）
 interface HistoryRecord {
-  id: string
-  image_key: string
-  image_url: string
-  product_name?: string
-  health_score: number
-  recommendation: 'recommend' | 'caution' | 'avoid'
+  _id: string
+  imageKey: string
+  imageUrl: string
+  productName?: string
+  healthScore: number
+  recommendation: '推荐' | '谨慎食用' | '不推荐'
   ingredients: Array<{
     name: string
-    riskLevel: 'safe' | 'warning' | 'danger'
+    category?: string
+    riskLevel: '安全' | '警告' | '危险'
     description: string
-    alternatives?: string
+    suggestion?: string
   }>
-  created_at: string
+  identity?: 'adult' | 'pregnant' | 'child'
+  createTime: number | string
 }
 
 const HistoryPage = () => {
   const [loading, setLoading] = useState(true)
   const [history, setHistory] = useState<HistoryRecord[]>([])
 
-  // 获取历史记录
+  // 获取历史记录（使用云函数）
   const fetchHistory = async () => {
     setLoading(true)
     try {
-      const res = await Network.request({
-        url: '/api/ingredients/history',
-        method: 'GET'
-      })
-      
-      console.log('历史记录响应:', res.data)
-      
-      const data = res.data?.data || res.data || []
-      setHistory(data as HistoryRecord[])
+      const data = await CloudService.getHistory()
+      console.log('历史记录:', data)
+      setHistory(data || [])
     } catch (error) {
       console.error('获取历史失败:', error)
       Taro.showToast({ title: '获取历史失败', icon: 'none' })
@@ -54,7 +50,7 @@ const HistoryPage = () => {
     fetchHistory()
   }, [])
 
-  // 删除记录
+  // 删除记录（使用云函数）
   const handleDelete = async (id: string) => {
     try {
       const res = await Taro.showModal({
@@ -63,11 +59,7 @@ const HistoryPage = () => {
       })
       
       if (res.confirm) {
-        await Network.request({
-          url: `/api/ingredients/history/${id}`,
-          method: 'DELETE'
-        })
-        
+        await CloudService.deleteHistory(id)
         Taro.showToast({ title: '删除成功', icon: 'success' })
         fetchHistory()
       }
@@ -77,38 +69,46 @@ const HistoryPage = () => {
     }
   }
 
-  // 查看详情
-  const handleViewDetail = (record: HistoryRecord) => {
-    // 跳转回首页并显示详情（通过全局状态或URL参数）
-    Taro.navigateTo({
-      url: `/pages/index/index?historyId=${record.id}`
-    })
-  }
-
   // 获取推荐样式
-  const getRecommendationBadge = (rec: 'recommend' | 'caution' | 'avoid') => {
+  const getRecommendationBadge = (rec: '推荐' | '谨慎食用' | '不推荐') => {
     switch (rec) {
-      case 'recommend':
+      case '推荐':
         return { text: '推荐', className: 'bg-green-500 text-white' }
-      case 'caution':
+      case '谨慎食用':
         return { text: '谨慎', className: 'bg-orange-500 text-white' }
-      case 'avoid':
+      case '不推荐':
         return { text: '不推荐', className: 'bg-red-500 text-white' }
+      default:
+        return { text: '未知', className: 'bg-gray-500 text-white' }
     }
   }
 
   // 格式化日期
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr)
+  const formatDate = (timestamp: number | string) => {
+    const date = new Date(timestamp)
     return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`
   }
 
   // 计算风险统计
   const getRiskStats = (ingredients: HistoryRecord['ingredients']) => {
-    const safe = ingredients.filter(i => i.riskLevel === 'safe').length
-    const warning = ingredients.filter(i => i.riskLevel === 'warning').length
-    const danger = ingredients.filter(i => i.riskLevel === 'danger').length
+    const safe = ingredients?.filter(i => i.riskLevel === '安全').length || 0
+    const warning = ingredients?.filter(i => i.riskLevel === '警告').length || 0
+    const danger = ingredients?.filter(i => i.riskLevel === '危险').length || 0
     return { safe, warning, danger }
+  }
+
+  // 获取身份图标
+  const getIdentityIcon = (identity?: 'adult' | 'pregnant' | 'child') => {
+    switch (identity) {
+      case 'adult':
+        return { Icon: User, label: '成人', color: '#22c55e' }
+      case 'pregnant':
+        return { Icon: Heart, label: '孕妇', color: '#ec4899' }
+      case 'child':
+        return { Icon: Baby, label: '儿童', color: '#3b82f6' }
+      default:
+        return { Icon: User, label: '成人', color: '#22c55e' }
+    }
   }
 
   return (
@@ -163,16 +163,18 @@ const HistoryPage = () => {
           {history.map((record) => {
             const badgeInfo = getRecommendationBadge(record.recommendation)
             const riskStats = getRiskStats(record.ingredients)
+            const identityInfo = getIdentityIcon(record.identity)
+            const IdentityIcon = identityInfo.Icon
             
             return (
-              <Card key={record.id} className="mb-3">
+              <Card key={record._id} className="mb-3">
                 <CardContent className="p-4">
                   <View className="flex flex-row gap-3">
                     {/* 图片预览 */}
                     <View className="flex-shrink-0">
                       <Image 
-                        src={record.image_url}
-                        className="w-16 h-16 rounded-lg object-cover"
+                        src={record.imageUrl}
+                        className="w-16 h-16 rounded-lg"
                         mode="aspectFill"
                       />
                     </View>
@@ -182,12 +184,25 @@ const HistoryPage = () => {
                       <View className="flex flex-row items-center justify-between mb-1">
                         <View className="flex flex-row items-center">
                           <Text className="block text-lg font-bold text-gray-800">
-                            {record.health_score}分
+                            {record.healthScore}分
                           </Text>
                           <Badge className={`${badgeInfo.className} ml-2`}>
                             <Text className="text-xs">{badgeInfo.text}</Text>
                           </Badge>
                         </View>
+                      </View>
+                      
+                      {/* 产品名称 */}
+                      {record.productName && (
+                        <Text className="block text-xs text-gray-600 mb-1 truncate">
+                          {record.productName}
+                        </Text>
+                      )}
+                      
+                      {/* 身份标识 */}
+                      <View className="flex flex-row items-center mb-1">
+                        <IdentityIcon size={12} color={identityInfo.color} />
+                        <Text className="text-xs text-gray-500 ml-1">{identityInfo.label}</Text>
                       </View>
                       
                       {/* 风险统计 */}
@@ -214,7 +229,7 @@ const HistoryPage = () => {
                       
                       {/* 时间 */}
                       <Text className="block text-xs text-gray-400">
-                        {formatDate(record.created_at)}
+                        {formatDate(record.createTime)}
                       </Text>
                     </View>
                     
@@ -223,14 +238,7 @@ const HistoryPage = () => {
                       <Button 
                         variant="ghost" 
                         size="sm"
-                        onClick={() => handleViewDetail(record)}
-                      >
-                        <Text className="text-green-600 text-xs">详情</Text>
-                      </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="sm"
-                        onClick={() => handleDelete(record.id)}
+                        onClick={() => handleDelete(record._id)}
                       >
                         <Trash2 size={16} color="#ef4444" />
                       </Button>
@@ -241,7 +249,7 @@ const HistoryPage = () => {
             )
           })}
           
-          {/* 加载更多 */}
+          {/* 刷新按钮 */}
           <View className="text-center mt-4">
             <Button variant="outline" onClick={fetchHistory}>
               <Text className="text-green-600">刷新历史</Text>
