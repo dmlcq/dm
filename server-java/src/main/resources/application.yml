@@ -1,0 +1,46 @@
+spring:
+  application:
+    name: ingredients-analyzer
+  
+  # 数据库配置 (PostgreSQL / Supabase)
+  datasource:
+    url: jdbc:postgresql://${DATABASE_HOST:localhost}:${DATABASE_PORT:5432}/${DATABASE_NAME:ingredients}
+    username: ${DATABASE_USER:postgres}
+    password: ${DATABASE_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+  
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+
+  # 文件上传配置
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 10MB
+      max-request-size: 20MB
+
+# 服务配置
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+# 对象存储配置 (TOS / S3)
+storage:
+  endpoint: ${TOS_ENDPOINT:https://tos-cn-beijing.volces.com}
+  access-key: ${TOS_ACCESS_KEY:your-access-key}
+  secret-key: ${TOS_SECRET_KEY:your-secret-key}
+  bucket: ${TOS_BUCKET:ingredients-bucket}
+  region: ${TOS_REGION:cn-beijing}
+
+# LLM API 配置
+llm:
+  api-url: ${LLM_API_URL:https://ark.cn-beijing.volces.com/api/v3/chat/completions}
+  api-key: ${LLM_API_KEY:your-api-key}
+  model: ${LLM_MODEL:doubao-seed-2-0-pro-260215}
