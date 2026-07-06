@@ -2,6 +2,7 @@ import { View, Text, Image } from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import { useState } from 'react'
 import CloudService from '@/cloud-service'
+import { Network } from '@/network'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -54,11 +55,15 @@ const IndexPage = () => {
   // 选择图片（拍照或相册）
   const handleChooseImage = async (sourceType: 'camera' | 'album') => {
     try {
+      console.log('开始选择图片，平台:', Taro.getEnv(), 'sourceType:', sourceType)
+      
       const res = await Taro.chooseImage({
         count: 1,
         sizeType: ['compressed'],
         sourceType: [sourceType]
       })
+      
+      console.log('选择图片成功:', res.tempFilePaths)
       
       const tempFilePath = res.tempFilePaths[0]
       setLocalImagePath(tempFilePath)
@@ -67,13 +72,14 @@ const IndexPage = () => {
       
       // 自动上传并分析
       await uploadAndAnalyze(tempFilePath)
-    } catch (error) {
+    } catch (error: any) {
       console.error('选择图片失败:', error)
-      Taro.showToast({ title: '选择图片失败', icon: 'none' })
+      const errorMsg = error?.errMsg || error?.message || '未知错误'
+      Taro.showToast({ title: `选择图片失败: ${errorMsg}`, icon: 'none', duration: 3000 })
     }
   }
 
-  // 上传图片并分析（使用云开发）
+  // 上传图片并分析（根据平台选择不同的服务）
   const uploadAndAnalyze = async (filePath: string) => {
     setLoading(true)
     try {
@@ -81,8 +87,16 @@ const IndexPage = () => {
       const identityLabel = identity === 'adult' ? '成人' : identity === 'pregnant' ? '孕妇' : '儿童'
       Taro.showToast({ title: `正在分析（${identityLabel}标准）...`, icon: 'loading', duration: 30000 })
       
-      // 1. 上传图片到云存储
-      const uploadResult = await CloudService.uploadImage(filePath)
+      console.log('当前平台:', Taro.getEnv(), '是否微信小程序:', isWeapp)
+      
+      // 根据平台选择不同的服务
+      if (isWeapp) {
+        // 微信小程序：使用云开发
+        console.log('使用微信云开发')
+        
+        // 1. 上传图片到云存储
+        const uploadResult = await CloudService.uploadImage(filePath)
+        console.log('云存储上传结果:', uploadResult)
       setImageUrl(uploadResult.imageUrl)
       
       console.log('上传成功:', uploadResult)
@@ -112,6 +126,44 @@ const IndexPage = () => {
         Taro.showToast({ title: '已从缓存获取', icon: 'success' })
       } else {
         Taro.showToast({ title: '分析完成', icon: 'success' })
+      }
+      } else {
+        // H5端：使用 NestJS 后端
+        console.log('使用NestJS后端')
+        
+        // 1. 上传图片到对象存储
+        const uploadRes = await Network.uploadFile({
+          url: '/api/ingredients/upload',
+          filePath: filePath,
+          name: 'file'
+        }) as any
+        
+        console.log('上传结果:', uploadRes.data)
+        const { imageKey, imageUrl: uploadedUrl } = uploadRes.data?.data || {}
+        if (uploadedUrl) setImageUrl(uploadedUrl)
+        
+        // 2. 调用分析接口
+        const analyzeRes = await Network.request({
+          url: '/api/ingredients/analyze',
+          method: 'POST',
+          data: { imageKey, identity }
+        }) as any
+        
+        console.log('分析结果:', analyzeRes.data)
+        const analyzeResult = analyzeRes.data?.data
+        
+        // 处理结果格式
+        if (analyzeResult) {
+          setResult(analyzeResult)
+        }
+        
+        Taro.hideToast()
+        
+        if (analyzeResult?.cached) {
+          Taro.showToast({ title: '已从缓存获取', icon: 'success' })
+        } else {
+          Taro.showToast({ title: '分析完成', icon: 'success' })
+        }
       }
       
     } catch (error) {
