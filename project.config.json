@@ -1,5 +1,5 @@
 {
-  "miniprogramRoot": "./dist",
+  "miniprogramRoot": "./dist/",
   "cloudfunctionRoot": "./cloudfunctions/",
   "projectname": "coze-mini-program",
   "description": "食品配料表健康分析工具",
