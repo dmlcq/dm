@@ -57,6 +57,29 @@ const IndexPage = () => {
     try {
       console.log('开始选择图片，平台:', Taro.getEnv(), 'sourceType:', sourceType)
       
+      // 微信小程序端需要先获取授权
+      if (sourceType === 'camera' && Taro.getEnv() === Taro.ENV_TYPE.WEAPP) {
+        try {
+          await Taro.authorize({ scope: 'scope.camera' })
+          console.log('相机权限已授权')
+        } catch (authErr) {
+          console.log('相机权限未授权，尝试申请:', authErr)
+          // 引导用户打开设置页面授权
+          try {
+            await Taro.showModal({
+              title: '需要相机权限',
+              content: '请在设置中开启相机权限，以便拍摄配料表图片',
+              confirmText: '去设置'
+            })
+            await Taro.openSetting()
+            // 用户授权后再次尝试
+          } catch (settingErr) {
+            Taro.showToast({ title: '请授权相机权限', icon: 'none' })
+            return
+          }
+        }
+      }
+      
       const res = await Taro.chooseImage({
         count: 1,
         sizeType: ['compressed'],
