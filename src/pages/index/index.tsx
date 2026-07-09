@@ -273,7 +273,7 @@ const IndexPage = () => {
       {/* 顶部标题 */}
       <View className="text-center mb-4">
         <Leaf size={32} color="#22c55e" className="mb-2" />
-        <Text className="block text-xl font-bold text-gray-800">配料表AI分析</Text>
+        <Text className="block text-xl font-bold text-gray-800">配料表健康分析</Text>
         <Text className="block text-sm text-gray-500 mt-1">
           智能识别配料，守护健康饮食
         </Text>
@@ -392,7 +392,7 @@ const IndexPage = () => {
               <Skeleton className="h-16 w-full rounded-lg" />
             </View>
             <Text className="block text-center text-sm text-gray-500 mt-4">
-              AI正在分析配料...
+              正在分析配料...
             </Text>
           </CardContent>
         </Card>

@@ -2,7 +2,7 @@
   "miniprogramRoot": "./dist",
   "cloudfunctionRoot": "./cloudfunctions/",
   "projectname": "coze-mini-program",
-  "description": "食品配料表AI分析小程序",
+  "description": "食品配料表健康分析工具",
   "appid": "touristappid",
   "setting": {
     "urlCheck": true,
