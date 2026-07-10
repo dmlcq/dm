@@ -277,10 +277,6 @@ const IndexPage = () => {
         <Text className="block text-sm text-gray-500 mt-1">
           智能识别配料，守护健康饮食
         </Text>
-        {/* 云开发环境提示 */}
-        {isWeapp && (
-          <Text className="block text-xs text-green-500 mt-1">✓ 云开发模式</Text>
-        )}
         {/* 历史记录入口 */}
         <View className="mt-3">
           <Button 
