@@ -173,19 +173,34 @@ const IndexPage = () => {
         }) as any
         
         console.log('分析结果:', analyzeRes.data)
-        const analyzeResult = analyzeRes.data?.data
-        
-        // 处理结果格式
-        if (analyzeResult) {
-          setResult(analyzeResult)
+        const rawData = analyzeRes.data?.data
+
+        // 格式转换：后端返回字段 -> 前端期望字段
+        const riskLevelMap: Record<string, '安全' | '警告' | '危险'> = {
+          'safe': '安全',
+          'warning': '警告',
+          'danger': '危险'
         }
-        
-        Taro.hideToast()
-        
-        if (analyzeResult?.cached) {
-          Taro.showToast({ title: '已从缓存获取', icon: 'success' })
-        } else {
-          Taro.showToast({ title: '分析完成', icon: 'success' })
+
+        if (rawData) {
+          const analyzeResult: AnalysisResult = {
+            healthScore: rawData.score || rawData.healthScore || 0,
+            recommendation: rawData.recommendation,
+            recommendationReason: rawData.recommendationReason || '',
+            productName: rawData.productName || '',
+            ingredients: (rawData.ingredients || []).map((ing: any) => ({
+              name: ing.name,
+              riskLevel: riskLevelMap[ing.riskLevel] || '安全',
+              description: ing.description,
+              alternatives: ing.alternatives
+            })),
+            healthTips: rawData.summary || rawData.healthTips || '',
+            identity: rawData.identity,
+            cached: rawData.cached
+          }
+          setResult(analyzeResult)
+          Taro.hideToast()
+          Taro.showToast({ title: analyzeResult.cached ? '已从缓存获取' : '分析完成', icon: 'success' })
         }
       }
       
