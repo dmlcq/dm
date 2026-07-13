@@ -281,7 +281,7 @@ export class IngredientsService {
 
   // 使用多模态LLM分析配料表图片（根据身份定制分析）
   private async analyzeWithLLM(imageKey: string, identity: IdentityType): Promise<AnalysisResult> {
-    // 获取图片URL
+    // 获取图片预签名URL（LLM需要可访问的URL，有效期1小时）
     const imageUrl = await this.storage.generatePresignedUrl({
       key: imageKey,
       expireTime: 3600
